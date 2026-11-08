@@ -1,0 +1,133 @@
+name: Build OSM tiles
+
+on:
+  schedule:
+    # Monthly, 3rd day 03:17 UTC (Geofabrik publishes daily; off the hour to avoid peaks).
+    - cron: "17 3 3 * *"
+  workflow_dispatch:
+  # A change to the build itself runs it once, so a fix is published without waiting a month.
+  push:
+    branches: [main]
+    paths:
+      - build.sh
+      - schema/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: write # create releases and commit manifest.json — GITHUB_TOKEN only, no secrets
+
+concurrency:
+  group: osm-build
+  cancel-in-progress: false
+
+env:
+  KEEP_RELEASES: 2
+  ASSET: indonesia-roads.pmtiles
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build PMTiles
+        run: bash build.sh
+
+      - name: Publish release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="osm-$(date -u +%Y-%m-%d)"
+          if gh release view "$TAG" >/dev/null 2>&1; then TAG="${TAG}-r${GITHUB_RUN_NUMBER}"; fi
+          SOURCE_DATE="$(jq -r .source_date dist/build-info.json)"
+          BYTES="$(jq -r .bytes dist/build-info.json)"
+          gh release create "$TAG" "dist/${ASSET}" "dist/build-info.json" \
+            --title "Indonesia roads ${TAG#osm-}" \
+            --notes "Roads, footpaths and public-transport stops from OpenStreetMap (Geofabrik extract of ${SOURCE_DATE}), z14 PMTiles, ${BYTES} bytes.
+
+          Data © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0 — https://www.openstreetmap.org/copyright"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Order matters (the ArkitFlow server reads tiles of the releases manifest.json
+      # names): 1. check the new asset answers range requests, 2. commit manifest.json
+      # pointing at it, 3. wait out the caches of the old manifest, 4. only then delete
+      # releases that are no longer kept. At every moment the manifest in use names
+      # releases that exist. If any step fails, nothing old has been deleted.
+      - name: Check the new asset is servable
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+          for i in 1 2 3 4 5; do
+            CODE="$(curl -sSL -r 0-6 -o /tmp/magic -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = "206" ] && [ "$(cat /tmp/magic)" = "PMTiles" ]; then echo "ok: $URL"; exit 0; fi
+            echo "attempt $i: HTTP $CODE"; sleep 20
+          done
+          echo "new release asset is not servable" >&2; exit 1
+
+      - name: Choose releases to keep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("osm-"))] | sort_by(.createdAt) | reverse | .[].tagName' \
+            > /tmp/tags.txt
+          # The new release is always kept, whatever the listing order says.
+          { echo "$TAG"; grep -vxF "$TAG" /tmp/tags.txt | head -n "$((KEEP_RELEASES - 1))"; } > /tmp/kept.txt
+          grep -vxF -f /tmp/kept.txt /tmp/tags.txt > /tmp/delete.txt || true
+          echo "keep:"; cat /tmp/kept.txt; echo "delete later:"; cat /tmp/delete.txt
+
+      # manifest.json tells the ArkitFlow server which releases it may read. Committing it
+      # every month is also the repository activity that keeps the schedule enabled
+      # (GitHub disables schedules in public repos after 60 days without activity).
+      - name: Update manifest.json
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg tag "$TAG" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --slurpfile info dist/build-info.json \
+            --rawfile kept /tmp/kept.txt \
+            '{
+              current: ($info[0] + {tag: $tag,
+                url: "https://github.com/\($repo)/releases/download/\($tag)/\($info[0].asset)"}),
+              servable: ($kept | split("\n") | map(select(length > 0))),
+              attribution: "© OpenStreetMap contributors",
+              attribution_url: "https://www.openstreetmap.org/copyright",
+              license: "ODbL-1.0"
+            }' > manifest.json
+          cat manifest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "manifest: ${TAG}"
+          # main may have moved since checkout (e.g. a push during the build)
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Delete releases no longer kept
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s /tmp/delete.txt ]; then echo "nothing to delete"; exit 0; fi
+          # raw.githubusercontent.com caches manifest.json ~5 min and the ArkitFlow server
+          # keeps it 10 min: wait 20 min so no server still names a release we delete.
+          sleep 1200
+          while read -r old; do
+            echo "deleting $old"
+            gh release delete "$old" --yes --cleanup-tag
+          done < /tmp/delete.txt

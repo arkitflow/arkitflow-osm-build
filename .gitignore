@@ -1,0 +1,7 @@
+# Build outputs and downloads — published by the workflow as release assets, never committed
+dl/
+dist/
+work/
+*.pmtiles
+*.osm.pbf
+*.jar

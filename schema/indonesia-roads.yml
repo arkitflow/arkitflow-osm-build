@@ -1,0 +1,83 @@
+# planetiler custom schema — ArkitFlow site context (roads, paths, transit), z14 only.
+# Run with: planetiler.jar generate-custom --schema=schema/indonesia-roads.yml ...
+schema_name: ArkitFlow site context — Indonesia roads
+schema_description: Roads, footpaths and public-transport stops from OpenStreetMap, z14 only.
+attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>
+args:
+  osm_path: dl/indonesia-latest.osm.pbf
+  minzoom: 14
+  maxzoom: 14
+sources:
+  osm:
+    type: osm
+    local_path: '${ args.osm_path }'
+layers:
+  - id: roads
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 14
+        include_when:
+          highway:
+            - motorway
+            - motorway_link
+            - trunk
+            - trunk_link
+            - primary
+            - primary_link
+            - secondary
+            - secondary_link
+            - tertiary
+            - tertiary_link
+            - unclassified
+            - residential
+            - living_street
+            - service
+            - road
+            - track
+            - pedestrian
+            - footway
+            - path
+            - steps
+            - cycleway
+        attributes:
+          - key: highway
+          - key: name
+          - key: oneway
+          - key: lanes
+          - key: width
+          - key: maxspeed
+          - key: surface
+          - key: sidewalk
+          - key: bridge
+          - key: tunnel
+  - id: transit
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 14
+        include_when:
+          __any__:
+            highway: bus_stop
+            public_transport: [platform, station, stop_position]
+            railway: [station, halt, tram_stop, subway_entrance]
+            amenity: [bus_station, ferry_terminal]
+        attributes:
+          - key: highway
+          - key: public_transport
+          - key: railway
+          - key: amenity
+          - key: name
+      - source: osm
+        geometry: polygon_point_on_surface
+        min_zoom: 14
+        include_when:
+          __any__:
+            public_transport: [platform, station]
+            railway: [station, platform]
+            amenity: [bus_station, ferry_terminal]
+        attributes:
+          - key: public_transport
+          - key: railway
+          - key: amenity
+          - key: name
