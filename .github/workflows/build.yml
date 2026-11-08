@@ -84,7 +84,8 @@ jobs:
             --jq '[.[] | select(.tagName | startswith("osm-"))] | sort_by(.createdAt) | reverse | .[].tagName' \
             > /tmp/tags.txt
           # The new release is always kept, whatever the listing order says.
-          { echo "$TAG"; grep -vxF "$TAG" /tmp/tags.txt | head -n "$((KEEP_RELEASES - 1))"; } > /tmp/kept.txt
+          # (grep exits 1 when the new release is the only one — the first run — hence || true.)
+          { echo "$TAG"; { grep -vxF "$TAG" /tmp/tags.txt || true; } | head -n "$((KEEP_RELEASES - 1))"; } > /tmp/kept.txt
           grep -vxF -f /tmp/kept.txt /tmp/tags.txt > /tmp/delete.txt || true
           echo "keep:"; cat /tmp/kept.txt; echo "delete later:"; cat /tmp/delete.txt
 
