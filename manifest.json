@@ -1,21 +1,39 @@
 {
-  "current": {
-    "asset": "indonesia-roads.pmtiles",
-    "bytes": 206802967,
-    "sha256": "ed1edec732309a9a13d8710f707dae43001d4050da503b0044412db5b00b9a7b",
-    "source": "https://download.geofabrik.de/asia/indonesia-latest.osm.pbf",
-    "source_md5": "7bb9d75d178967ca68bd6e20e176d6fe",
-    "source_date": "2026-11-08T00:44:25Z",
-    "planetiler": "0.10.2",
-    "schema": "schema/indonesia-roads.yml",
-    "built_at": "2026-11-08T23:55:38Z",
-    "tag": "osm-2026-11-08-r2",
-    "url": "https://github.com/arkitflow/arkitflow-osm-build/releases/download/osm-2026-11-08-r2/indonesia-roads.pmtiles"
+  "schema": 2,
+  "current": "osm-2026-11-09",
+  "releases": {
+    "osm-2026-11-09": {
+      "source_date": "2026-11-08T23:55:40Z",
+      "built_at": "2026-11-09T04:54:37Z",
+      "archives": {
+        "roads": {
+          "asset": "indonesia-roads.pmtiles",
+          "bytes": 206806783,
+          "sha256": "5dcb3833f32a6f780c744b6337d92ea87acd804025062ffcfddc3f545db22df4",
+          "schema": "schema/indonesia-roads.yml",
+          "build_seconds": 111
+        },
+        "context": {
+          "asset": "indonesia-context.pmtiles",
+          "bytes": 731285091,
+          "sha256": "96b2291985f7a32b17b4aa934d7b4149bc42add98dfbeea2143820a10bdd4362",
+          "schema": "schema/indonesia-context.yml",
+          "build_seconds": 256
+        }
+      }
+    },
+    "osm-2026-11-08-r2": {
+      "source_date": "2026-11-08T00:44:25Z",
+      "built_at": "2026-11-08T23:55:38Z",
+      "archives": {
+        "roads": {
+          "asset": "indonesia-roads.pmtiles",
+          "bytes": 206802967,
+          "sha256": "ed1edec732309a9a13d8710f707dae43001d4050da503b0044412db5b00b9a7b"
+        }
+      }
+    }
   },
-  "servable": [
-    "osm-2026-11-08-r2",
-    "osm-2026-11-08"
-  ],
   "attribution": "© OpenStreetMap contributors",
   "attribution_url": "https://www.openstreetmap.org/copyright",
   "license": "ODbL-1.0"
