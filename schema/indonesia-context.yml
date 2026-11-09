@@ -1,0 +1,131 @@
+# planetiler custom schema — ArkitFlow site context (buildings, land, water, rail), z14 only.
+# Separate from indonesia-roads.yml so the small road archive stays small.
+# Run with: planetiler.jar generate-custom --schema=schema/indonesia-context.yml ...
+schema_name: ArkitFlow site context — Indonesia buildings, land, water, rail
+schema_description: Buildings, green space and land use, water and railways from OpenStreetMap, z14 only.
+attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>
+args:
+  osm_path: dl/indonesia-latest.osm.pbf
+  minzoom: 14
+  maxzoom: 14
+sources:
+  osm:
+    type: osm
+    local_path: '${ args.osm_path }'
+layers:
+  # Footprints only; heights come from building:levels / height where mapped (rare).
+  - id: buildings
+    features:
+      - source: osm
+        geometry: polygon
+        min_zoom: 14
+        include_when:
+          building: __any__
+        exclude_when:
+          building: ["no", "construction", "proposed", "demolished", "abandoned"]
+        attributes:
+          - key: building
+          - key: building:levels
+          - key: height
+          - key: name
+
+  # Green space, farmland and open land. Paddy fields are landuse=paddy, or
+  # landuse=farmland + crop=rice.
+  - id: landcover
+    features:
+      - source: osm
+        geometry: polygon
+        min_zoom: 14
+        include_when:
+          __any__:
+            landuse:
+              - forest
+              - farmland
+              - paddy
+              - meadow
+              - grass
+              - orchard
+              - plantation
+              - allotments
+              - recreation_ground
+              - village_green
+              - cemetery
+            leisure:
+              - park
+              - garden
+              - pitch
+              - playground
+              - golf_course
+              - nature_reserve
+              - stadium
+              - track
+            natural:
+              - wood
+              - scrub
+              - grassland
+              - wetland
+              - heath
+              - sand
+              - beach
+              - bare_rock
+        attributes:
+          - key: landuse
+          - key: leisure
+          - key: natural
+          - key: crop
+          - key: name
+
+  # Water areas: lakes, ponds, reservoirs, river areas, canals drawn as areas.
+  - id: water
+    features:
+      - source: osm
+        geometry: polygon
+        min_zoom: 14
+        include_when:
+          __any__:
+            natural: water
+            landuse: [reservoir, basin]
+            waterway: [riverbank, dock]
+        attributes:
+          - key: natural
+          - key: water
+          - key: waterway
+          - key: landuse
+          - key: intermittent
+          - key: name
+
+  # Centre lines of rivers, streams, canals and drains, plus the coastline
+  # (natural=coastline ways; the land is on their left).
+  - id: waterways
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 14
+        include_when:
+          waterway: [river, stream, canal, drain, ditch]
+        attributes:
+          - key: waterway
+          - key: intermittent
+          - key: tunnel
+          - key: name
+      - source: osm
+        geometry: line
+        min_zoom: 14
+        include_when:
+          natural: coastline
+        attributes:
+          - key: natural
+
+  - id: railways
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 14
+        include_when:
+          railway: [rail, light_rail, subway, monorail, tram, narrow_gauge]
+        attributes:
+          - key: railway
+          - key: service
+          - key: tunnel
+          - key: bridge
+          - key: name

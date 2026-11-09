@@ -22,12 +22,11 @@ concurrency:
 
 env:
   KEEP_RELEASES: 2
-  ASSET: indonesia-roads.pmtiles
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +35,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Build PMTiles
+      - name: Build PMTiles (roads + context)
         run: bash build.sh
 
       - name: Publish release
@@ -48,31 +47,42 @@ jobs:
           TAG="osm-$(date -u +%Y-%m-%d)"
           if gh release view "$TAG" >/dev/null 2>&1; then TAG="${TAG}-r${GITHUB_RUN_NUMBER}"; fi
           SOURCE_DATE="$(jq -r .source_date dist/build-info.json)"
-          BYTES="$(jq -r .bytes dist/build-info.json)"
-          gh release create "$TAG" "dist/${ASSET}" "dist/build-info.json" \
-            --title "Indonesia roads ${TAG#osm-}" \
-            --notes "Roads, footpaths and public-transport stops from OpenStreetMap (Geofabrik extract of ${SOURCE_DATE}), z14 PMTiles, ${BYTES} bytes.
-
-          Data © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0 — https://www.openstreetmap.org/copyright"
+          SIZES="$(jq -r '.archives | to_entries | map("- \(.value.asset): \(.value.bytes) bytes") | join("\n")' dist/build-info.json)"
+          mapfile -t ASSETS < <(jq -r '.archives[].asset | "dist/" + .' dist/build-info.json)
+          {
+            echo "OpenStreetMap data for Indonesia (Geofabrik extract of ${SOURCE_DATE}), z14 PMTiles:"
+            echo "- indonesia-roads: roads, footpaths and public-transport stops"
+            echo "- indonesia-context: buildings, land cover, water and railways"
+            echo
+            echo "$SIZES"
+            echo
+            echo "Data © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0 — https://www.openstreetmap.org/copyright"
+          } > /tmp/notes.md
+          gh release create "$TAG" "${ASSETS[@]}" dist/build-info.json \
+            --title "Indonesia OSM ${TAG#osm-}" --notes-file /tmp/notes.md
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       # Order matters (the ArkitFlow server reads tiles of the releases manifest.json
-      # names): 1. check the new asset answers range requests, 2. commit manifest.json
-      # pointing at it, 3. wait out the caches of the old manifest, 4. only then delete
-      # releases that are no longer kept. At every moment the manifest in use names
-      # releases that exist. If any step fails, nothing old has been deleted.
-      - name: Check the new asset is servable
+      # names): 1. check every new asset answers range requests, 2. commit manifest.json
+      # pointing at the new release, 3. wait out the caches of the old manifest, 4. only
+      # then delete releases that are no longer kept. At every moment the manifest in use
+      # names releases that exist. If any step fails, nothing old has been deleted.
+      - name: Check the new assets are servable
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
-          for i in 1 2 3 4 5; do
-            CODE="$(curl -sSL -r 0-6 -o /tmp/magic -w '%{http_code}' "$URL" || true)"
-            if [ "$CODE" = "206" ] && [ "$(cat /tmp/magic)" = "PMTiles" ]; then echo "ok: $URL"; exit 0; fi
-            echo "attempt $i: HTTP $CODE"; sleep 20
+          for ASSET in $(jq -r '.archives[].asset' dist/build-info.json); do
+            URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+            ok=""
+            for i in 1 2 3 4 5; do
+              CODE="$(curl -sSL -r 0-6 -o /tmp/magic -w '%{http_code}' "$URL" || true)"
+              if [ "$CODE" = "206" ] && [ "$(cat /tmp/magic)" = "PMTiles" ]; then ok=1; break; fi
+              echo "attempt $i: HTTP $CODE for $ASSET"; sleep 20
+            done
+            [ -n "$ok" ] || { echo "::error::$URL is not servable" >&2; exit 1; }
+            echo "ok: $URL"
           done
-          echo "new release asset is not servable" >&2; exit 1
 
       - name: Choose releases to keep
         env:
@@ -89,27 +99,46 @@ jobs:
           grep -vxF -f /tmp/kept.txt /tmp/tags.txt > /tmp/delete.txt || true
           echo "keep:"; cat /tmp/kept.txt; echo "delete later:"; cat /tmp/delete.txt
 
-      # manifest.json tells the ArkitFlow server which releases it may read. Committing it
-      # every month is also the repository activity that keeps the schedule enabled
-      # (GitHub disables schedules in public repos after 60 days without activity).
+      # manifest.json (schema 2) tells the ArkitFlow server which releases it may read and
+      # which archives each one holds. Each kept release is described from its OWN
+      # build-info.json and asset list, never from the previous manifest, so a release
+      # from an older build (roads only) is listed with exactly what it has.
+      # Committing it every month is also the repository activity that keeps the schedule
+      # enabled (GitHub disables schedules in public repos after 60 days without activity).
       - name: Update manifest.json
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          jq -n \
-            --arg tag "$TAG" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            --slurpfile info dist/build-info.json \
-            --rawfile kept /tmp/kept.txt \
-            '{
-              current: ($info[0] + {tag: $tag,
-                url: "https://github.com/\($repo)/releases/download/\($tag)/\($info[0].asset)"}),
-              servable: ($kept | split("\n") | map(select(length > 0))),
-              attribution: "© OpenStreetMap contributors",
-              attribution_url: "https://www.openstreetmap.org/copyright",
-              license: "ODbL-1.0"
-            }' > manifest.json
+          echo '{}' > /tmp/releases.json
+          while read -r REL; do
+            [ -n "$REL" ] || continue
+            gh release download "$REL" -p build-info.json -O /tmp/info.json --clobber
+            gh release view "$REL" --json assets --jq '[.assets[].name]' > /tmp/assets.json
+            # build-info.json: schema-2 shape {archives: {...}} or the first build's
+            # {asset, bytes, sha256} (roads only). Keep only archives present as assets.
+            jq --arg tag "$REL" --slurpfile info /tmp/info.json --slurpfile assets /tmp/assets.json '
+              ($info[0]) as $i
+              | ($i.archives // {roads: {asset: $i.asset, bytes: $i.bytes, sha256: $i.sha256}}) as $a
+              | . + {($tag): {
+                  source_date: $i.source_date,
+                  built_at: $i.built_at,
+                  archives: ($a | with_entries(select(.value.asset as $n | $assets[0] | index($n))))
+                }}' /tmp/releases.json > /tmp/releases.next.json
+            mv /tmp/releases.next.json /tmp/releases.json
+          done < /tmp/kept.txt
+          jq -n --arg tag "$TAG" --slurpfile releases /tmp/releases.json '{
+            schema: 2,
+            current: $tag,
+            releases: $releases[0],
+            attribution: "© OpenStreetMap contributors",
+            attribution_url: "https://www.openstreetmap.org/copyright",
+            license: "ODbL-1.0"
+          }' > manifest.json
+          # The new release must be listed with every archive it was built with.
+          jq -e --slurpfile info dist/build-info.json \
+            '.releases[.current].archives | keys == ($info[0].archives | keys)' manifest.json >/dev/null
           cat manifest.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

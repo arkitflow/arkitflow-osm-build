@@ -1,26 +1,39 @@
 # arkitflow-osm-build
 
-Builds the road data used by the site analysis of [ArkitFlow](https://arkitflow.com)
-(Sun & Shadow Study → Site tab): roads, footpaths and public-transport stops for
-Indonesia, as a single [PMTiles](https://github.com/protomaps/PMTiles) archive of vector
-tiles at zoom 14.
+Builds the OpenStreetMap data used by the site analysis of [ArkitFlow](https://arkitflow.com)
+(Sun & Shadow Study): two [PMTiles](https://github.com/protomaps/PMTiles) archives of
+vector tiles for Indonesia at zoom 14, published together in one release per month.
 
 ## Data
 
 - **Source:** OpenStreetMap, via the Geofabrik extract
   [`indonesia-latest.osm.pbf`](https://download.geofabrik.de/asia/indonesia.html)
-  (checksum-verified on every build).
-- **Content** (see [`schema/indonesia-roads.yml`](schema/indonesia-roads.yml)):
+  (checksum-verified on every build). Both archives come from the same extract.
+- **`indonesia-roads.pmtiles`** (≈ 210 MB, see [`schema/indonesia-roads.yml`](schema/indonesia-roads.yml)):
   - `roads` — lines for `highway` = motorway … residential, living_street, service,
     road, track, pedestrian, footway, path, steps, cycleway; attributes `highway`,
     `name`, `oneway`, `lanes`, `width`, `maxspeed`, `surface`, `sidewalk`, `bridge`,
     `tunnel`.
   - `transit` — bus stops, platforms, stations, halts, bus/ferry terminals; attributes
     `highway`, `public_transport`, `railway`, `amenity`, `name`.
-  - Buildings are not included.
-- **Output:** `indonesia-roads.pmtiles` (≈ 210 MB, z14 only, gzip-compressed MVT),
-  published as a GitHub Release asset. The two newest releases are kept;
-  [`manifest.json`](manifest.json) names them and the current one.
+- **`indonesia-context.pmtiles`** (≈ 730 MB, see [`schema/indonesia-context.yml`](schema/indonesia-context.yml)):
+  - `buildings` — footprints (`building=*` except no / construction / proposed /
+    demolished / abandoned); attributes `building`, `building:levels`, `height`, `name`.
+  - `landcover` — parks, gardens, pitches, forest, farmland and paddy fields, grass,
+    scrub, wetland, sand, cemeteries; attributes `landuse`, `leisure`, `natural`,
+    `crop`, `name`.
+  - `water` — lakes, ponds, reservoirs, river areas; attributes `natural`, `water`,
+    `waterway`, `landuse`, `intermittent`, `name`.
+  - `waterways` — river, stream, canal, drain and ditch centre lines (`waterway`,
+    `intermittent`, `tunnel`, `name`) and the coastline (`natural=coastline`).
+  - `railways` — rail, narrow gauge, light rail, subway, monorail, tram; attributes
+    `railway`, `service`, `tunnel`, `bridge`, `name`.
+- **Output:** both archives (z14 only, gzip-compressed MVT) and `build-info.json`
+  (sizes, checksums, source date) as assets of one GitHub Release. `build.sh` stops if an
+  archive reaches 1.5 GiB, well under GitHub's 2 GiB asset limit. The two newest releases
+  are kept; [`manifest.json`](manifest.json) (schema 2) names them, the archives each one
+  holds and the current one. A new release is listed in the manifest before any old one
+  is deleted, and old ones are deleted only after the manifest caches have expired.
 
 ## Build
 
